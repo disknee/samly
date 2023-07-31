@@ -26,13 +26,21 @@ defmodule Samly.SPHandler do
   end
 
   def consume_signin_response(conn) do
+Logger.info("calling SP.Handler.consume_signin_response", [])
     %IdpData{id: idp_id} = idp = conn.private[:samly_idp]
     %IdpData{pre_session_create_pipeline: pipeline, esaml_sp_rec: sp_rec} = idp
     sp = ensure_sp_uris_set(sp_rec, conn)
 
+Logger.info("idp: #{inspect idp}", [])
+Logger.info("sp from ensure_sp_uris_set: #{inspect sp}", [])
+
     saml_encoding = conn.body_params["SAMLEncoding"]
     saml_response = conn.body_params["SAMLResponse"]
     relay_state = conn.body_params["RelayState"] |> safe_decode_www_form()
+
+Logger.info("saml_encoding: #{inspect saml_encoding}", [])
+Logger.info("saml_response: #{inspect saml_response}", [])
+Logger.info("relay_state: #{inspect relay_state}", [])
 
     with {:ok, assertion} <- Helper.decode_idp_auth_resp(sp, saml_encoding, saml_response),
          :ok <- validate_authresp(conn, assertion, relay_state),
@@ -43,10 +51,19 @@ defmodule Samly.SPHandler do
       computed = updated_assertion.computed
       assertion = %Assertion{assertion | computed: computed, idp_id: idp_id}
 
+Logger.info("updated_assertion #{inspect updated_assertion}", [])
+Logger.info("computed: #{inspect computed}", [])
+Logger.info("assertion: #{inspect assertion}", [])
+
       nameid = assertion.subject.name
       assertion_key = {idp_id, nameid}
       conn = State.put_assertion(conn, assertion_key, assertion)
       target_url = auth_target_url(conn, assertion, relay_state)
+
+Logger.info("nameid:C #{inspect nameid}", [])
+Logger.info("assertion_key: #{inspect assertion_key}", [])
+Logger.info("conn: #{inspect conn}", [])
+Logger.info("target_url: #{target_url}", [])
 
       conn
       |> configure_session(renew: true)
@@ -54,8 +71,12 @@ defmodule Samly.SPHandler do
       |> redirect(302, target_url)
     else
       {:halted, conn} -> conn
-      {:error, reason} -> conn |> send_resp(403, "access_denied #{inspect(reason)}")
-      _ -> conn |> send_resp(403, "access_denied")
+      {:error, reason} ->
+Logger.error("access_denied error: #{inspect(reason)}")
+        conn |> send_resp(403, "access_denied #{inspect(reason)}")
+      error ->
+Logger.error("access_denied else error: #{inspect(error)}")
+        conn |> send_resp(403, "access_denied")
     end
 
     # rescue
@@ -67,6 +88,7 @@ defmodule Samly.SPHandler do
   # IDP-initiated flow auth response
   @spec validate_authresp(Conn.t(), Assertion.t(), binary) :: :ok | {:error, atom}
   defp validate_authresp(conn, %{subject: %{in_response_to: ""}}, relay_state) do
+Logger.info("calling validate_authresp for IDP-initiated flow auth response", [])
     idp_data = conn.private[:samly_idp]
 
     if idp_data.allow_idp_initiated_flow do
@@ -80,28 +102,39 @@ defmodule Samly.SPHandler do
         :ok
       end
     else
+Logger.error("error in validate_authresp :idp_first_flow_not_allowed")
       {:error, :idp_first_flow_not_allowed}
     end
   end
 
   # SP-initiated flow auth response
   defp validate_authresp(conn, _assertion, relay_state) do
+Logger.info("calling calling for SP-initiated flow auth response", [])
     %IdpData{id: idp_id} = conn.private[:samly_idp]
     rs_in_session = get_session(conn, "relay_state")
     idp_id_in_session = get_session(conn, "idp_id")
     url_in_session = get_session(conn, "target_url")
 
+Logger.info("idp_id #{inspect idp_id}", [])
+Logger.info("rs_in_session: #{inspect rs_in_session}", [])
+Logger.info("idp_id_in_session: #{inspect idp_id_in_session}", [])
+Logger.info("url_in_session: #{inspect url_in_session}", [])
+
     cond do
       rs_in_session == nil || rs_in_session != relay_state ->
+Logger.error("invalid_relay_state")
         {:error, :invalid_relay_state}
 
       idp_id_in_session == nil || idp_id_in_session != idp_id ->
+Logger.error("invalid_idp_id")
         {:error, :invalid_idp_id}
 
       url_in_session == nil ->
+Logger.error("invalid_target_url")
         {:error, :invalid_target_url}
 
       true ->
+Logger.error("validate_authresp success")
         :ok
     end
   end

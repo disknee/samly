@@ -1,6 +1,7 @@
 defmodule Samly.Helper do
   @moduledoc false
 
+  require Logger
   require Samly.Esaml
   alias Samly.{Assertion, Esaml, IdpData}
 
@@ -68,13 +69,24 @@ defmodule Samly.Helper do
   end
 
   def decode_idp_auth_resp(sp, saml_encoding, saml_response) do
+Logger.info("calling decode_idp_auth_resp", [])
     with {:ok, xml_frag} <- decode_saml_payload(saml_encoding, saml_response),
          {:ok, assertion_rec} <- :esaml_sp.validate_assertion(xml_frag, sp) do
       {:ok, Assertion.from_rec(assertion_rec)}
     else
-      {:error, reason} -> {:error, reason}
-      error -> {:error, {:invalid_request, "#{inspect(error)}"}}
+      {:error, reason} -> error_one(reason)
+      error -> error_two(error)
     end
+  end
+
+  def error_one(reason) do
+Logger.error("first reason is: #{inspect reason}")
+    {:error, reason}
+  end
+
+  def error_two(error) do
+Logger.error("second reason is invalid_request #{inspect(error)}")
+    {:error, {:invalid_request, "#{inspect(error)}"}}
   end
 
   def decode_idp_signout_resp(sp, saml_encoding, saml_response) do
@@ -109,11 +121,15 @@ defmodule Samly.Helper do
   end
 
   defp decode_saml_payload(saml_encoding, saml_payload) do
+Logger.info("calling Helper.decode_saml_payload", [])
     try do
       xml = :esaml_binding.decode_response(saml_encoding, saml_payload)
+Logger.info("xml_frag from esaml_binding.decode_response: #{inspect xml}", [])
       {:ok, xml}
     rescue
-      error -> {:error, {:invalid_response, "#{inspect(error)}"}}
+      error ->
+Logger.error("error in Helper.decode_saml_payload {inspect(error)}")
+        {:error, {:invalid_response, "#{inspect(error)}"}}
     end
   end
 end
